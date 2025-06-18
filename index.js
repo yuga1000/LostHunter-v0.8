@@ -43,9 +43,8 @@ namespace LaserGRBL.SvgConverter
 		private static float gcodeXYFeed = 1999;        // XY feed to apply for G1
 
 		//private static bool gcodeSpindleToggle = true; // Switch on/off spindle for Pen down/up (M3/M5)
-		private static float gcodeSpindleSpeed = 999; // Spindle speed to apply
-		private static string gcodeSpindleCmdOn = "G1 Z-1"; // Spindle Command M3 / M4
-		private static string gcodeSpindleCmdOff = "G1 Z1"; // Spindle Command M3 / M4
+                private static string gcodeSpindleCmdOn = "G1 Z-1"; // Pen down
+                private static string gcodeSpindleCmdOff = "G1 Z1"; // Pen up
 
 		private static bool gcodeCompress = true;      // reduce code by avoiding sending again same G-Nr and unchanged coordinates
 													   //public static bool gcodeRelative = false;      // calculate relative coordinates for G91
@@ -56,33 +55,17 @@ namespace LaserGRBL.SvgConverter
 
 		private static Firmware firmwareType = Settings.GetObject("Firmware Type", Firmware.Grbl);
 		
-		private static int rapidnum = 0;
-		private static bool SupportPWM = true;
+                private static int rapidnum = 0;
 
-		public static void setup(GrblCore core)
-		{
-			SupportPWM = Settings.GetObject("Support Hardware PWM", true); //If Support PWM use S command instead of M3-M4 / M5
+                public static void setup(GrblCore core)
+                {
+                        setDecimalPlaces(mDecimalPlaces);
 
-			setDecimalPlaces(mDecimalPlaces);
+                        gcodeXYFeed = Settings.GetObject("GrayScaleConversion.VectorizeOptions.BorderSpeed", 1000);
 
-			gcodeXYFeed = Settings.GetObject("GrayScaleConversion.VectorizeOptions.BorderSpeed", 1000);
-			
-			if (SupportPWM)
-				gcodeSpindleSpeed = Settings.GetObject("GrayScaleConversion.Gcode.LaserOptions.PowerMax", 255);
-			else
-				gcodeSpindleSpeed = (float)GrblCore.Configuration.MaxPWM;
-
-
-			// Smoothieware firmware need a value between 0.0 and 1.1
-			if (firmwareType == Firmware.Smoothie)
-				gcodeSpindleSpeed /= 255.0f;
-			gcodeSpindleCmdOn = Settings.GetObject("GrayScaleConversion.Gcode.LaserOptions.LaserOn", "M106");
-			gcodeSpindleCmdOff = Settings.GetObject("GrayScaleConversion.Gcode.LaserOptions.LaserOff", "M107");
-			SupportPWM = Settings.GetObject("Support Hardware PWM", true); //If Support PWM use S command instead of M3-M4 / M5
-
-			lastMovewasG0 = true;
-			lastx = -1; lasty = -1; lastz = 0; lasts = -1 ; lastg = -1;
-		}
+                        lastMovewasG0 = true;
+                        lastx = -1; lasty = -1; lastz = 0; lastg = -1;
+                }
 
 		public static bool reduceGCode
 		{
@@ -154,133 +137,39 @@ namespace LaserGRBL.SvgConverter
 		private static StringBuilder secondMove = new StringBuilder();
 		private static bool applyXYFeedRate = true; // apply XY feed after each Pen-move
 
-		public static void SpindleOn(StringBuilder gcodeString, string cmt = "")
-		{
-			if (cmt.Length > 0) cmt = string.Format(" ({0})", cmt);
+                public static void SpindleOn(StringBuilder gcodeString, string cmt = "")
+                {
+                        if (cmt.Length > 0) cmt = string.Format(" ({0})", cmt);
+                        gcodeString.AppendFormat("{0}{1}\r\n", gcodeSpindleCmdOn, cmt);
+                }
 
-			if (SupportPWM)
-				gcodeString.AppendFormat("S{0}{1}\r\n", gcodeSpindleSpeed, cmt); //only set SMax
-			else
-				gcodeString.AppendFormat("{0}{1}\r\n", gcodeSpindleCmdOn, cmt); //only set M3/M4
-		}
+                public static void SpindleOff(StringBuilder gcodeString, string cmt = "")
+                {
+                        if (cmt.Length > 0) cmt = string.Format(" ({0})", cmt);
+                        gcodeString.AppendFormat("{0}{1}\r\n", gcodeSpindleCmdOff, cmt);
+                }
 
-		public static void SpindleOff(StringBuilder gcodeString, string cmt = "")
-		{
-			if (cmt.Length > 0) cmt = string.Format(" ({0})", cmt);
-			
-			if (SupportPWM)
-				gcodeString.AppendFormat("S0{0}\r\n", cmt); //only set S0
-			else
-				gcodeString.AppendFormat("{0}{1}\r\n", gcodeSpindleCmdOff, cmt); //only set M5
-		}
+                internal static void PutInitialCommand(StringBuilder gcodeString)
+                {
+                        gcodeString.AppendFormat("{0}\r\n", gcodeSpindleCmdOff);
+                }
 
-		internal static void PutInitialCommand(StringBuilder gcodeString)
-		{
-			if (SupportPWM)
-				gcodeString.AppendFormat("{0} S0\r\n", gcodeSpindleCmdOn); //turn ON with zero power
-			else
-				gcodeString.AppendFormat("{0} S{1}\r\n", gcodeSpindleCmdOff, gcodeSpindleSpeed); //turn OFF and set MaxPower
-		}
+                internal static void PutFinalCommand(StringBuilder gcodeString)
+                {
+                        gcodeString.AppendFormat("{0}\r\n", gcodeSpindleCmdOff);
+                }
 
-		internal static void PutFinalCommand(StringBuilder gcodeString)
-		{
-			if (SupportPWM)
-				gcodeString.AppendFormat("M5 S0\r\n"); //turn OFF and zero power
-			else
-				gcodeString.AppendFormat("M5 S0\r\n"); //turn OFF and zero power
-		}
+                public static void PenDown(StringBuilder gcodeString, string cmto = "")
+                {
+                        SpindleOn(gcodeString, cmto);
+                }
 
-		public static void PenDown(StringBuilder gcodeString, string cmto = "")
-		{
-			string cmt = cmto;
-			drag1stMove = true;
-			origFinalX = lastx;
-			origFinalY = lasty;
-			//if (gcodeComments) { gcodeString.Append("\r\n"); }
-			if (cmt.Length > 0) { cmt = string.Format("({0})", cmt); }
+                public static void PenUp(StringBuilder gcodeString, string cmto = "")
+                {
+                        SpindleOff(gcodeString, cmto);
+                }
 
-			applyXYFeedRate = true;     // apply XY Feed Rate after each PenDown command (not just after Z-axis)
-
-			//if (gcodeSpindleToggle)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen down: Spindle-On");
-			SpindleOn(gcodeString, cmto);
-			//}
-			//if (gcodeZApply)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen down: Z-Axis");
-			//    float z_relative = gcodeZDown - lastz;
-			//    if (gcodeRelative)
-			//        gcodeString.AppendFormat("G{0} Z{1} F{2} {3}\r\n", frmtCode(1), frmtNum(z_relative), gcodeZFeed, cmt);
-			//    else
-			//        gcodeString.AppendFormat("G{0} Z{1} F{2} {3}\r\n", frmtCode(1), frmtNum(gcodeZDown), gcodeZFeed, cmt);
-
-			//    gcodeTime += Math.Abs((gcodeZUp - gcodeZDown) / gcodeZFeed);
-			//    gcodeLines++; lastg = 1; lastf = gcodeZFeed;
-			//    lastz = gcodeZDown;
-			//}
-			//if (gcodePWMEnable)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen down: Servo control");
-			//    gcodeString.AppendFormat("M{0} S{1} {2}\r\n", gcodeSpindleCmd, gcodePWMDown, cmt);
-			//    gcodeString.AppendFormat("G{0} P{1}\r\n", frmtCode(4), frmtNum(gcodePWMDlyDown));
-			//    gcodeTime += gcodePWMDlyDown;
-			//    gcodeLines++;
-			//}
-			//if (gcodeIndividualTool)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen down: Individual Cmd");
-			//    string[] commands = gcodeIndividualDown.Split(';');
-			//    foreach (string cmd in commands)
-			//    { gcodeString.AppendFormat("{0}\r\n", cmd.Trim()); }
-			//}
-			//if (gcodeComments) gcodeString.Append("\r\n");
-
-			//gcodeDownUp++;
-		}
-
-		public static void PenUp(StringBuilder gcodeString, string cmto = "")
-		{
-			string cmt = cmto;
-			drag1stMove = true;
-			origFinalX = lastx;
-			origFinalY = lasty;
-			//if (gcodeComments) { gcodeString.Append("\r\n"); }
-			if (cmt.Length > 0) { cmt = string.Format("({0})", cmt); }
-
-			//if (gcodeIndividualTool)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen up: Individual Cmd");
-			//    string[] commands = gcodeIndividualUp.Split(';'); 
-			//    foreach (string cmd in commands)
-			//    {   gcodeString.AppendFormat("{0}\r\n", cmd.Trim());}
-			//}
-
-			//if (gcodePWMEnable)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen up: Servo control");
-			//    gcodeString.AppendFormat("M{0} S{1} {2}\r\n", gcodeSpindleCmd, gcodePWMUp, cmt);
-			//    gcodeString.AppendFormat("G{0} P{1}\r\n", frmtCode(4), frmtNum(gcodePWMDlyUp));
-			//    gcodeTime += gcodePWMDlyUp;
-			//    gcodeLines++;
-			//}
-
-			//if (gcodeZApply)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen up: Z-Axis");
-			//    float z_relative = gcodeZUp - lastz;
-			//    if (gcodeRelative)
-			//        gcodeString.AppendFormat("G{0} Z{1} {2}\r\n", frmtCode(0), frmtNum(z_relative), cmt); // use G0 without feedrate
-			//    else
-			//        gcodeString.AppendFormat("G{0} Z{1} {2}\r\n", frmtCode(0), frmtNum(gcodeZUp), cmt); // use G0 without feedrate
-
-			//    gcodeTime += Math.Abs((gcodeZUp - gcodeZDown) / gcodeZFeed);
-			//    gcodeLines++; lastg = 1; lastf = gcodeZFeed;
-			//    lastz = gcodeZUp;
-			//}
-
-			//if (gcodeSpindleToggle)
-			//{   if (gcodeComments) gcodeString.AppendFormat("({0})\r\n", "Pen up: Spindle-Off");
-			SpindleOff(gcodeString, cmto);
-			//}
-			//if (gcodeComments) gcodeString.Append("\r\n");
-			dragCompi = 0; dragCompj = 0;
-		}
-
-		public static float lastx, lasty, lastz, lastg = -1, lastf, lasts;
+                public static float lastx, lasty, lastz, lastg = -1, lastf;
 		public static bool lastMovewasG0 = true;
 		public static void MoveTo(StringBuilder gcodeString, Point coord, string cmt = "")
 		{ MoveSplit(gcodeString, 1, (float)coord.X, (float)coord.Y, applyXYFeedRate, cmt); }
@@ -525,13 +414,6 @@ namespace LaserGRBL.SvgConverter
 						lastf = gcodeXYFeed;
 						isneeded = true;
 					}
-					// Smothieware firmware need to know laserpower when G1 command is run
-					if ((gnr == 1) && (lasts != gcodeSpindleSpeed) && firmwareType == Firmware.Smoothie)
-					{
-						gcodeTmp.AppendFormat("S{0}", frmtNum(gcodeSpindleSpeed));
-						lasts = gcodeSpindleSpeed;
-						isneeded = true;
-					}
 					gcodeTmp.AppendFormat("{0}\r\n", cmt);
 					if (isneeded)
 						gcodeString.Append(gcodeTmp);
@@ -577,8 +459,7 @@ namespace LaserGRBL.SvgConverter
 		{ MoveArc(gcodeString, gnr, x, y, i, j, applyXYFeedRate, cmt, avoidG23); }
 		private static void MoveArc(StringBuilder gcodeString, int gnr, float x, float y, float i, float j, bool applyFeed, string cmt = "", bool avoidG23 = false)
 		{
-			string feed = "";
-			string splindleSpeed = "";
+                        string feed = "";
 			float x_relative = x - lastx;
 			float y_relative = y - lasty;
 
@@ -588,18 +469,13 @@ namespace LaserGRBL.SvgConverter
 				applyXYFeedRate = false;                        // don't set feed next time
 			}
 			if (cmt.Length > 0) cmt = string.Format("({0})", cmt);
-			// Smothieware firmware need to know laserpower when G2-G3 command is run
-			if (firmwareType == Firmware.Smoothie)
-			{
-				splindleSpeed = string.Format("S{0}", frmtNum(gcodeSpindleSpeed));
-			}
 			if (gcodeNoArcs || avoidG23)
 			{
 				splitArc(gcodeString, gnr, lastx, lasty, x, y, i, j, applyFeed, cmt);
 			}
 			else
 			{
-				gcodeString.AppendFormat("G{0}X{1}Y{2}I{3}J{4}{5}{6}{7}\r\n", frmtCode(gnr), frmtNum(x), frmtNum(y), frmtNum(i), frmtNum(j), feed, splindleSpeed, cmt);
+                                gcodeString.AppendFormat("G{0}X{1}Y{2}I{3}J{4}{5}{6}\r\n", frmtCode(gnr), frmtNum(x), frmtNum(y), frmtNum(i), frmtNum(j), feed, cmt);
 				lastg = gnr;
 			}
 			//gcodeTime += fdistance(lastx, lasty, x, y) / gcodeXYFeed;
